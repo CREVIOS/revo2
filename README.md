@@ -1,4 +1,4 @@
-![Revo Code Reviewer responding to a comment](https://github.com/user-attachments/assets/1d60c2e9-82ed-4ee5-b749-f9e021c85f4d)
+![Revo Code Reviewer responding to a comment](Presentation - Meet the Code Reviewer!.png)
 
 # Revo Code Reviewer
 
