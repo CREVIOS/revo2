@@ -1,4 +1,4 @@
-![Revo Code Reviewer responding to a comment](Presentation - Meet the Code Reviewer!.png)
+![Revo Code Reviewer responding to a comment](https://github.com/CREVIOS/revo2/blob/65ee0ce26bd6860ba5dfcbba1350a51388985ff4/Presentation%20-%20Meet%20the%20Code%20Reviewer!.png)
 
 # Revo Code Reviewer
 
