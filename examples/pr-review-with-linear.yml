@@ -1,26 +1,4 @@
-# =============================================================================
-# Claude Code Action - PR Review with Linear Integration
-# =============================================================================
-# This workflow performs comprehensive PR reviews and creates INDIVIDUAL Linear
-# tickets for each issue found, enabling granular tracking and assignment.
-#
-# Features:
-# - Automatic PR review on open/sync/ready events
-# - Manual re-review via @claude comments
-# - Creates SEPARATE Linear tickets per issue (not consolidated)
-# - Links tickets to PR with proper metadata
-# - Inline code comments for specific issues
-# - Severity-based priority and labeling
-#
-# Required Secrets:
-# - CLAUDE_CODE_OAUTH_TOKEN: OAuth token for Claude Code
-# - LINEAR_API_KEY: Linear API key for creating issues
-#
-# Optional Secrets:
-# - LINEAR_TEAM_ID: Default team ID (auto-detected if not provided)
-# =============================================================================
-
-name: Claude PR Review with Linear
+name: Revo PR Review
 
 on:
   # Auto-review on PR open/update
