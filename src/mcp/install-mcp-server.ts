@@ -93,6 +93,10 @@ export async function prepareMcpConfig(
       tool.startsWith("mcp__linear__"),
     );
 
+    const hasSequentialThinkingTools = allowedToolsList.some((tool) =>
+      tool.startsWith("mcp__sequential_thinking__"),
+    );
+
     const baseMcpConfig: { mcpServers: Record<string, unknown> } = {
       mcpServers: {},
     };
@@ -242,6 +246,21 @@ export async function prepareMcpConfig(
         },
       };
       core.info("Linear MCP server enabled for issue tracking");
+    }
+
+    // Include Sequential Thinking server when explicitly requested via allowed tools
+    if (hasSequentialThinkingTools) {
+      baseMcpConfig.mcpServers.sequential_thinking = {
+        command: "bun",
+        args: [
+          "run",
+          `${process.env.GITHUB_ACTION_PATH}/src/mcp/sequential-thinking-server.ts`,
+        ],
+        env: {},
+      };
+      core.info(
+        "Sequential Thinking MCP server enabled for structured reasoning",
+      );
     }
 
     // Return only our GitHub servers config

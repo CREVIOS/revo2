@@ -7,4 +7,3 @@ Thank you for helping us keep this action and the systems they interact with sec
 This repository is maintained by Revo.
 
 The security of our systems and user data is Revo's’s top priority. We appreciate the work of security researchers acting in good faith in identifying and reporting potential vulnerabilities.
-
