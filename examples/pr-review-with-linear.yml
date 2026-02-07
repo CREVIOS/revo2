@@ -1,7 +1,7 @@
 name: Revo PR Review
 
 on:
-  # Auto-review on PR open/update
+  # Auto-review on PR open/update (skip draft PRs via job condition)
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
@@ -20,9 +20,9 @@ concurrency:
 
 jobs:
   claude-review:
-    # Run on PR events OR when @claude is mentioned
+    # Run on non-draft PR events OR when @claude is mentioned in comments
     if: |
-      github.event_name == 'pull_request' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && github.event.issue.pull_request) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
@@ -38,7 +38,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Full history for better diff context
+          fetch-depth: 0
 
       - name: Run Claude PR Review with Linear
         id: claude
@@ -58,157 +58,251 @@ jobs:
 
           # Review instructions with Linear integration
           prompt: |
+            You are a senior staff engineer performing a precise, high-signal code review.
+            Your goal is to find real, impactful issues — not to generate noise. Every comment
+            you make should be something a senior engineer would genuinely flag in a real review.
+
             ## Context
             - **Repository**: ${{ github.repository }}
-            - **PR Number**: #${{ github.event.pull_request.number || github.event.issue.number }}
-            - **PR Title**: ${{ github.event.pull_request.title || github.event.issue.title }}
+            - **PR**: #${{ github.event.pull_request.number || github.event.issue.number }}
+            - **Title**: ${{ github.event.pull_request.title || github.event.issue.title }}
             - **Author**: @${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-            - **PR URL**: https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number || github.event.issue.number }}
+            - **Base branch**: ${{ github.event.pull_request.base.ref || 'main' }}
+            - **URL**: https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number || github.event.issue.number }}
 
-            ## Task
-            Perform a comprehensive code review of this pull request and create **SEPARATE Linear tickets for EACH distinct issue** found.
+            ## Phase 1: Understand the Codebase Context
 
-            ## Review Focus Areas
+            Before reviewing any code, build understanding of the project conventions:
 
-            ### 1. Security (CRITICAL Priority)
-            - SQL injection, XSS, CSRF vulnerabilities
-            - Hardcoded secrets, API keys, credentials
-            - Authentication/authorization bypasses
-            - Insecure deserialization
-            - Path traversal vulnerabilities
-            - Sensitive data exposure
+            1. **Read project documentation** (if they exist — skip any that don't):
+               - `CLAUDE.md` — project-specific AI instructions and conventions
+               - `CONTRIBUTING.md` — contribution guidelines
+               - `docs/` or `documentation/` folder — architecture docs, ADRs, style guides
+               - `.github/PULL_REQUEST_TEMPLATE.md` — expected PR structure
+               - `README.md` — project overview, tech stack, patterns
 
-            ### 2. Bugs & Correctness (HIGH Priority)
-            - Logic errors and race conditions
-            - Null/undefined handling
-            - Off-by-one errors
-            - Resource leaks (memory, file handles, connections)
-            - Error handling gaps
-            - Edge case handling
+            2. **Read configuration files** to understand the tech stack:
+               - `package.json`, `tsconfig.json`, `pyproject.toml`, `Cargo.toml`, etc.
+               - Linter configs (`.eslintrc`, `.prettierrc`, `ruff.toml`, `.rubocop.yml`)
+               - Test configs (`jest.config`, `vitest.config`, `pytest.ini`)
 
-            ### 3. Performance (HIGH/MEDIUM Priority)
-            - N+1 query problems
-            - Unbounded loops or recursion
-            - Missing pagination/limits
-            - Inefficient algorithms (O(n²) when O(n) possible)
-            - Memory-intensive operations
-            - Missing caching opportunities
+            3. **Examine existing patterns** — look at 2-3 files similar to those changed
+               to understand the established conventions (naming, error handling, patterns).
 
-            ### 4. Code Quality (MEDIUM Priority)
-            - SOLID principles violations
-            - DRY violations (duplicated code)
-            - Complex/nested conditionals
-            - Missing or inadequate error messages
-            - Unclear naming conventions
+            This context is critical. Review violations of PROJECT conventions, not generic
+            best practices the project intentionally doesn't follow.
 
-            ### 5. Testing & Documentation (LOW Priority)
-            - Missing unit tests for new code
-            - Inadequate test coverage for edge cases
-            - Missing/outdated documentation
-            - Missing JSDoc/docstrings
+            ## Phase 2: Analyze the Diff
 
-            ## Review Process
-
-            ### Step 1: Analyze Changes
+            Retrieve the full diff:
             ```bash
             gh pr diff ${{ github.event.pull_request.number || github.event.issue.number }}
             ```
 
-            ### Step 2: Create Inline Comments
-            For each issue found, use `mcp__github_inline_comment__create_inline_comment` to add a comment directly on the problematic line with:
-            - Severity indicator: 🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🔵 LOW
-            - Clear description of the issue
-            - Suggested fix or code example
-
-            ### Step 3: Create Individual Linear Tickets
-            **IMPORTANT**: Create a SEPARATE Linear ticket for EACH distinct issue found (not one combined ticket).
-
-            First, get available teams:
-            ```
-            Use mcp__linear__get_teams to find available teams
+            Also retrieve the PR description and any linked issues for intent:
+            ```bash
+            gh pr view ${{ github.event.pull_request.number || github.event.issue.number }}
             ```
 
-            Then for EACH issue, create a ticket using `mcp__linear__create_issue` with these parameters:
+            Read each changed file IN FULL (not just the diff hunks) to understand the
+            complete context around changes. A line that looks wrong in isolation may be
+            correct in context.
 
-            **Required:**
-            - `title`: `[<SEVERITY>] <Brief issue description> - PR #${{ github.event.pull_request.number || github.event.issue.number }}`
-            - `team_id`: Team ID (use from get_teams or the default LINEAR_TEAM_ID)
+            ## Phase 3: Deep Analysis with Sequential Thinking
 
-            **Recommended:**
-            - `description`: Markdown formatted description:
-              ```markdown
-              ## Issue Description
-              <Detailed explanation>
+            Before posting any comments, use `mcp__sequential_thinking__sequentialthinking`
+            to reason through the changes systematically. This structured thinking prevents
+            false positives and ensures you only flag real issues.
 
-              ## Location
-              - **File**: `path/to/file.ts`
-              - **Line(s)**: 42-45
+            Use sequential thinking for:
+            - **Security analysis**: Trace data flow from user input through the changed code
+              to identify real injection/auth vulnerabilities (not theoretical ones).
+            - **Bug analysis**: Walk through execution paths step by step to confirm a bug
+              actually triggers in practice, not just in theory.
+            - **Architecture evaluation**: Think through how the changes interact with the
+              rest of the system before flagging design issues.
+            - **Confidence calibration**: For each potential issue, use a thought to ask
+              "Am I confident this is a real problem, or am I guessing?" Only flag if confident.
 
-              ## Code Snippet
-              ```typescript
-              // Problematic code here
+            Example usage — start with thought 1, estimate total thoughts, and continue:
+            ```
+            Thought 1/4: "Looking at the diff, there are 3 changed files. The auth handler
+            change modifies token validation. Let me trace the token flow..."
+            Thought 2/4: "The token is received from req.headers, passed to validateToken()
+            which... [traces the full path]. This IS vulnerable because..."
+            Thought 3/4: "The second file changes a database query. The input comes from...
+            and IS properly parameterized, so this is NOT an injection risk."
+            Thought 4/4: "Summary: 1 confirmed security issue, 1 false positive avoided."
+            ```
+
+            Use branching when you need to explore alternative interpretations:
+            - Branch to evaluate "is this a bug or intentional behavior?"
+            - Branch to compare "fix option A vs fix option B" for suggestions
+
+            ## Phase 4: Review with Precision
+
+            Apply the following review criteria. **Only flag issues you are confident about.**
+            If you are unsure whether something is a real issue, do NOT flag it.
+
+            ### CRITICAL — Must fix before merge (blocks shipment)
+            - **Security vulnerabilities**: injection (SQL, XSS, command), auth bypass,
+              secrets in code, path traversal, SSRF, insecure deserialization
+            - **Data loss or corruption**: writes without transactions where needed,
+              race conditions on shared state, missing cascading deletes
+            - **Breaking changes**: API contract violations, removed public interfaces
+              without deprecation
+
+            ### HIGH — Should fix before merge (significant risk)
+            - **Bugs**: logic errors, incorrect boundary conditions, null/undefined in
+              paths that will be hit, unhandled error cases that cause crashes
+            - **Resource leaks**: unclosed connections, missing cleanup in error paths,
+              event listener accumulation
+            - **Concurrency issues**: race conditions, deadlock potential, unsafe shared
+              mutation
+
+            ### MEDIUM — Should fix soon (tech debt with real cost)
+            - **Performance**: N+1 queries, O(n^2) where O(n) is straightforward,
+              unbounded collection growth, missing pagination on user-facing queries
+            - **Error handling**: swallowed exceptions hiding failures, missing error
+              context making debugging hard, catch blocks that silently continue
+            - **Convention violations**: patterns that contradict the project's established
+              conventions (found in Phase 1)
+
+            ### LOW — Consider improving (nice to have)
+            - **Readability**: confusing variable names in complex logic, deeply nested
+              conditionals that could be flattened, large functions doing multiple things
+            - **Test gaps**: new non-trivial logic without test coverage, missing edge case
+              tests for complex branching
+
+            ### DO NOT flag (these create noise)
+            - Style issues already handled by linters/formatters
+            - Missing docs on self-explanatory code
+            - "Could be slightly more efficient" without measurable impact
+            - Personal preferences that don't match project conventions
+            - Pre-existing issues in unchanged code
+            - Generic best-practice suggestions the codebase doesn't follow
+            - Trivial naming suggestions unless genuinely confusing
+
+            ## Phase 5: Post Inline Comments
+
+            For each real issue found, use `mcp__github_inline_comment__create_inline_comment`
+            to comment directly on the problematic line(s).
+
+            Format each comment as:
+
+            **[SEVERITY]** Brief one-line description
+
+            <explanation — 2-3 sentences max, explain WHY this is a problem and what
+            the concrete risk is>
+
+            ```suggestion
+            // concrete fix if applicable — use GitHub suggestion blocks so the
+            // author can apply with one click
+            ```
+
+            Rules for inline comments:
+            - **One issue per comment.** Don't bundle unrelated issues.
+            - **Be specific.** Say "this query runs per item in the loop (N+1)" not
+              "consider performance."
+            - **Always explain the risk.** Not just "this is wrong" but "this will throw
+              at runtime when X is null because Y."
+            - **Provide a fix when possible.** Use ```suggestion blocks for single-line
+              or multi-line replacements.
+            - **Comment on the RIGHT side** of the diff (new code), not the left.
+
+            ## Phase 6: Create Linear Tickets
+
+            Create a SEPARATE Linear ticket for EACH issue rated CRITICAL or HIGH.
+            MEDIUM issues should be grouped into a single ticket if there are 3+,
+            otherwise create individual tickets. Do NOT create tickets for LOW issues.
+
+            ### Setup
+            1. Get available teams: use `mcp__linear__get_teams`
+            2. Get available labels: use `mcp__linear__get_labels` (with team_id if available)
+
+            ### For each ticket, use `mcp__linear__create_issue` with:
+
+            - **title**: `[SEVERITY] Brief description — PR #${{ github.event.pull_request.number || github.event.issue.number }}`
+            - **team_id**: From get_teams or LINEAR_TEAM_ID
+            - **priority**: 1 (CRITICAL=Urgent), 2 (HIGH=High), 3 (MEDIUM=Normal)
+            - **description** (markdown):
+
+              ```
+              ## What
+              <One paragraph: what the issue is and why it matters>
+
+              ## Where
+              **File:** `path/to/file.ts`
+              **Lines:** 42-45
+              **Function/Method:** `handleUserInput()`
+
+              ## Evidence
+              ```<lang>
+              // the problematic code
               ```
 
               ## Suggested Fix
-              <How to resolve>
+              ```<lang>
+              // the corrected code
+              ```
+
+              ## Impact
+              <What happens if this is not fixed — be concrete>
 
               ## References
-              - PR: https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number || github.event.issue.number }}
-              - Author: @${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+              - PR: ${{ github.repository }}#${{ github.event.pull_request.number || github.event.issue.number }}
               ```
-            - `priority`: 1=Urgent (CRITICAL), 2=High, 3=Normal (MEDIUM), 4=Low
-            - `label_ids`: Label IDs matching severity and category (get from `mcp__linear__get_labels`)
 
-            **Priority Mapping:**
-            | Severity | Priority | Linear Priority |
-            |----------|----------|-----------------|
-            | CRITICAL | 1        | Urgent          |
-            | HIGH     | 2        | High            |
-            | MEDIUM   | 3        | Normal          |
-            | LOW      | 4        | Low             |
+            - **label_ids**: Match severity + category labels from `get_labels`
 
-            ### Step 4: Post Summary Comment
-            Post a summary comment on the PR with:
+            ### Deduplication
+            Before creating a ticket, use `mcp__linear__search_issues` to check if a
+            similar issue already exists for this PR. Search for the PR number in existing
+            issues. Skip creation if a matching ticket already exists.
+
+            ## Phase 7: Post Summary Comment
+
+            After all inline comments and tickets are created, post a single summary
+            comment on the PR using `gh pr comment`:
 
             ```markdown
-            ## 🔍 Code Review Summary
+            ## Code Review Summary
 
-            ### Overview
-            <Brief assessment of the PR quality>
+            **Verdict**: <APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION>
+
+            ### What This PR Does
+            <2-3 sentence summary of the changes and their purpose>
 
             ### Issues Found
 
-            | Severity | Issue | File | Linear Ticket |
-            |----------|-------|------|---------------|
-            | 🔴 CRITICAL | <description> | `file.ts:42` | [ABC-123](url) |
-            | 🟠 HIGH | <description> | `file.ts:100` | [ABC-124](url) |
-            | 🟡 MEDIUM | <description> | `file.ts:200` | [ABC-125](url) |
+            | # | Severity | Issue | Location | Linear |
+            |---|----------|-------|----------|--------|
+            | 1 | CRITICAL | <description> | `file.ts:42` | [TEAM-123](url) |
+            | 2 | HIGH | <description> | `file.ts:100` | [TEAM-124](url) |
 
-            ### Statistics
-            - 🔴 Critical: X issues
-            - 🟠 High: X issues
-            - 🟡 Medium: X issues
-            - 🔵 Low: X issues
-            - **Total**: X issues
+            <If no issues: "No issues found. This PR looks good to merge.">
 
-            ### Recommendations
-            <Prioritized list of what to fix first>
+            ### What Went Well
+            <1-3 things done well in this PR — be genuine, not generic>
 
-            ---
-            *Review performed by Claude Code Action with Linear integration*
+            ### Recommendation
+            <Clear next step: "Fix the 1 critical issue and this is good to merge"
+            or "Looks great, ship it">
             ```
 
-            ## Important Guidelines
-            - Create tickets ONLY for issues in the changed files (not pre-existing code)
-            - Each ticket should be atomic and independently actionable
-            - Group related sub-issues only if they're in the same function/context
-            - Always link tickets back to the PR
-            - If no issues found, post a positive summary (no tickets needed)
-            - Collect all Linear ticket identifiers to include in the summary table
+            ## Critical Rules
+            - **Only review changed code.** Never flag pre-existing issues.
+            - **Precision over recall.** 3 real issues > 10 issues where 7 are noise.
+            - **Respect project conventions.** If the codebase uses a pattern, don't flag it.
+            - **Read before judging.** Always read the full file, not just diff hunks.
+            - **Be actionable.** Every comment must have a clear "what to do next."
+            - **Skip if clean.** If the PR is well-written, say so and approve. Don't
+              manufacture issues to justify the review.
+            - **No duplicate tickets.** Always search Linear before creating.
 
-          # Tools configuration (Linear tools auto-enabled when linear_api_key is provided)
+          # Tools configuration
           claude_args: |
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,mcp__linear__get_teams,mcp__linear__get_workflow_states,mcp__linear__get_labels,mcp__linear__create_issue,mcp__linear__update_issue,mcp__linear__search_issues,mcp__linear__get_issue,mcp__linear__add_comment,mcp__linear__get_viewer,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*)"
+            --allowedTools "Read,Glob,Grep,LS,mcp__sequential_thinking__sequentialthinking,mcp__github_inline_comment__create_inline_comment,mcp__linear__get_teams,mcp__linear__get_workflow_states,mcp__linear__get_labels,mcp__linear__create_issue,mcp__linear__update_issue,mcp__linear__search_issues,mcp__linear__get_issue,mcp__linear__add_comment,mcp__linear__get_viewer,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(cat:*),Bash(ls:*)"
             --max-turns 50
 
           # Additional CI access for context
@@ -221,6 +315,7 @@ jobs:
 #
 # 1. Required GitHub Secrets:
 #    - CLAUDE_CODE_OAUTH_TOKEN: Run `claude setup-token` to generate
+#      OR ANTHROPIC_API_KEY: Your Anthropic API key
 #    - LINEAR_API_KEY: Create at https://linear.app/settings/api
 #
 # 2. Optional GitHub Secrets:
@@ -241,11 +336,16 @@ jobs:
 #    - mcp__linear__add_comment: Add comment to issue
 #    - mcp__linear__get_viewer: Get authenticated user info
 #
-# 5. Recommended Linear Labels (create in Linear if not exists):
-#    - Severity: critical, high-priority, medium-priority, low-priority
-#    - Category: security, bug, performance, code-quality, testing, documentation
+# 5. Sequential Thinking MCP Tool:
+#    - mcp__sequential_thinking__sequentialthinking: Structured reasoning
+#    Automatically enabled when included in allowedTools. No config needed.
+#    Helps Claude think through complex code paths before commenting.
 #
-# 6. Alternative Authentication:
+# 6. Recommended Linear Labels (create in Linear if not exists):
+#    Severity: critical, high, medium, low
+#    Category: security, bug, performance, code-quality
+#
+# 7. Alternative Authentication:
 #    - Anthropic API: Replace oauth token with anthropic_api_key
 #    - AWS Bedrock: Add use_bedrock: "true"
 #    - Google Vertex: Add use_vertex: "true"
@@ -254,22 +354,37 @@ jobs:
 # How It Works
 # =============================================================================
 #
-# When track_progress is enabled:
-# - Creates a tracking comment with progress checkboxes
-# - Includes all PR context (comments, attachments, images)
-# - Updates progress as the review proceeds
-# - Marks as completed when done
+# The review follows a 7-phase process:
 #
-# Linear Integration:
-# - Creates INDIVIDUAL tickets for each issue (not consolidated)
-# - Each ticket includes severity, description, code location
-# - Links back to the PR for full context
-# - Priority set based on severity level
+# Phase 1 — Context: Reads CLAUDE.md, CONTRIBUTING.md, docs/, configs
+#   to understand the project's conventions before reviewing.
+#
+# Phase 2 — Diff Analysis: Retrieves the full diff and reads changed
+#   files completely (not just hunks) for full context.
+#
+# Phase 3 — Sequential Thinking: Uses the sequential thinking MCP tool
+#   to reason through changes step-by-step. Traces data flows, confirms
+#   bugs actually trigger, and calibrates confidence before flagging.
+#   This phase eliminates false positives.
+#
+# Phase 4 — Precision Review: Applies a strict severity framework
+#   focused on real issues. Explicitly avoids noise (style nits,
+#   pre-existing issues, personal preferences).
+#
+# Phase 5 — Inline Comments: Posts actionable comments with severity
+#   tags and GitHub suggestion blocks for one-click fixes.
+#
+# Phase 6 — Linear Tickets: Creates individual tickets for CRITICAL
+#   and HIGH issues, with deduplication checks. MEDIUM issues are
+#   grouped. LOW issues get inline comments only.
+#
+# Phase 7 — Summary: Posts a verdict (APPROVE/REQUEST_CHANGES) with
+#   an issues table, what went well, and clear next steps.
 #
 # Example Output:
 # For a PR with 3 issues, Claude will create:
-# - ABC-101: [CRITICAL] SQL injection in user query - PR #42
-# - ABC-102: [HIGH] Missing null check in handler - PR #42
-# - ABC-103: [MEDIUM] Duplicate code in validation - PR #42
+# - ABC-101: [CRITICAL] SQL injection in user query — PR #42
+# - ABC-102: [HIGH] Missing null check in handler — PR #42
+# - ABC-103: [MEDIUM] Grouped: 3 code quality improvements — PR #42
 #
 # =============================================================================
